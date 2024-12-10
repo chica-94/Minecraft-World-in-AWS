@@ -1,7 +1,16 @@
 
 # AWS configuration
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.33"
+    }
+  }
+}
+
 provider "aws" {
-  region = "${var.region}"
+  region = var.region
 }
 
 ##########
@@ -113,6 +122,53 @@ resource "aws_security_group" "sg" {
 }
 
 
+
+resource "aws_security_group" "minecraft" {
+  name        = "Minecraft"
+  description = "Minecraft server traffic"
+
+  ingress {
+  from_port         = 25565
+  to_port           = 25565
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+
+  }
+
+  ingress {
+    from_port         = 22
+    to_port           = 22
+    protocol          = "tcp"
+    cidr_blocks       = ["0.0.0.0/0"]
+
+  }
+
+
+  engress {
+    from_port         = 0
+    to_port           = 0
+    protocol          = "all"
+    cidr_blocks       = ["0.0.0.0/0"]
+  }
+
+}
+
+
+##########
+# IAM
+##########
+
+resource "aws_iam_role" "role" {
+  name                = "Minecraft"
+  managed_policy_arns = [data.aws_iam_policy.cloud_watch_agent.arn]
+  assume_role_policy  = data.aws_iam_policy_document.assume_role.json
+}
+
+resource "aws_iam_instance_profile" "profile" {
+  name = "Minecraft"
+  role = aws_iam_role.role.name
+}
+
 ##########
 # EC2
 ##########
@@ -129,6 +185,24 @@ resource "aws_instance" "web" {
   tags = {
     Name = var.instanceNames[count.index]
   }
+}
+
+resource "aws_instance" "minecraft" {
+  ami                  = data.aws_ami.amazon_linux_2.id
+  iam_instance_profile = aws_iam_instance_profile.profile.name
+  instance_type        = var.instance_type
+  security_groups      = [aws_security_group.minecraft.name]
+  tags = {
+    Name = "Minecraft"
+  }
+  user_data = templatefile(
+    "scripts/startup.sh",
+    {
+      agent_config = templatefile("scripts/cloudwatch_agent_config.json", { log_group_name = aws_cloudwatch_log_group.minecraft.name })
+      download_url = var.download_url,
+      service      = file("scripts/minecraft.service")
+    }
+  )
 }
 
 
